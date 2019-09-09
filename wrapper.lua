@@ -8,10 +8,10 @@ local wraps = function(module, space, relations)
 
   if not space or type(space) == 'table' then
     relations = space
-    space = module:match(".([^.]+)$")
+    space = module:match("([^.]+)$")
   end
   relations = relations or {}
-
+  log.debug{"wrapping", module, space}
   local format = box.space[space]:format()
   if #format == 0 then
     log.error('no format specified for space ' .. tostring(space))
@@ -27,9 +27,8 @@ local wraps = function(module, space, relations)
   local wrapped_object = {}
 
   function wrapped_space:new(data)
-    if #data > 0 then
-      box.space[space]:put(data)
-    else
+    log.debug{"new obj in", space}
+    if #data == 0 then
       local to_insert = {}
       for k,v in pairs(data) do
         local pos = format_mapping.index[k]
@@ -38,10 +37,11 @@ local wraps = function(module, space, relations)
       data = to_insert
     end
 
-    return wrapped_object.new(box.space[space]:put(data))
+    return wrapped_object.new(box.space[space]:insert(data))
   end
 
   function wrapped_space:get(idx)
+    log.debug{"get obj from", space}
     local tnt = box.space[space]:get(idx)
     if tnt then
       return wrapped_object.new(tnt)
@@ -51,12 +51,13 @@ local wraps = function(module, space, relations)
   end
 
   function wrapped_space:delete(idx)
+    log.debug{"delete obj from", space, idx}
     box.space[space]:delete(idx)
   end
 
-  function wrapped_space:all()
+  function wrapped_space:all(idx)
     local result = {}
-    local raw_rows = box.space[space]:select{}
+    local raw_rows = box.space[space]:select(idx or {})
     for _, row in ipairs(raw_rows or {}) do
       local obj = self:get(row[1])
       table.insert(result, obj)
@@ -66,6 +67,24 @@ local wraps = function(module, space, relations)
 
   function wrapped_space:relations(map)
     relations = map
+  end
+
+  local builder_mt = {__index = {
+    new = function(self)
+      return wrapped_space:new(self)
+    end
+  }}
+  local link_mt = {__index = {
+    new = function(self)
+      return wrapped_space:get(self.__id)
+    end
+  }}
+  function wrapped_space:builder(data)
+    if type(data) == 'table' then
+      return setmetatable(data, builder_mt)
+    else
+      return setmetatable({__id = data}, link_mt)
+    end
   end
 
   local mt = {
@@ -105,6 +124,10 @@ local wraps = function(module, space, relations)
     return setmetatable({__tnt = tnt}, mt)
   end
 
+  function wrapped_object:space_name()
+    return space
+  end
+
   function wrapped_object:set(data)
     local new_data = {}
     for k, v in ipairs(self.__tnt) do
@@ -130,6 +153,8 @@ local wraps = function(module, space, relations)
     end
     return t
   end
+
+  setmetatable(wrapped_space, {__call = wrapped_space.builder})
 
   package.loaded[ module ] = wrapped_space
   return wrapped_space, wrapped_object
