@@ -28,16 +28,23 @@ local wraps = function(module, space, relations)
 
   function wrapped_space:new(data)
     log.debug{"new obj in", space}
+    local to_insert
+    local converted = true
     if #data == 0 then
-      local to_insert = {}
+      to_insert = {}
       for k,v in pairs(data) do
         local pos = format_mapping.index[k]
         to_insert[pos or k] = v
+        converted = converted and (type(pos or k) == "number")
       end
-      data = to_insert
+    else
+      to_insert = data
+    end
+    if not converted then
+      log.error{"inserting non existent columns", data, format_mapping.name}
     end
 
-    return wrapped_object.new(box.space[space]:insert(data))
+    return wrapped_object.new(box.space[space]:insert(to_insert))
   end
 
   function wrapped_space:get(idx)
